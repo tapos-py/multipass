@@ -107,7 +107,8 @@ TEST_P(TestBadMemorySizeFormats, rejectsBadFormats)
 }
 
 INSTANTIATE_TEST_SUITE_P(MemorySize, TestGoodMemorySizeFormats, ValuesIn(TestGoodMemorySizeFormats::generate_args()));
-INSTANTIATE_TEST_SUITE_P(MemorySize, TestBadMemorySizeFormats, Values("321BB", "321BK", "1024MM", "1024KM", "1024GK", "K", "", "123.321K", "123.321"));
+INSTANTIATE_TEST_SUITE_P(MemorySize, TestBadMemorySizeFormats,
+                         Values("321BB", "321BK", "1024MM", "1024KM", "1024GK", "K", "123.321K", "123.321"));
 
 TEST(MemorySize, defaultConstructsToZero)
 {
@@ -127,6 +128,11 @@ TEST(MemorySize, converts0ToM)
 TEST(MemorySize, converts0ToG)
 {
     EXPECT_EQ(mp::MemorySize{"0G"}.in_gigabytes(), 0LL);
+}
+
+TEST(MemorySize, convertsEmptyStringToZero)
+{
+    EXPECT_EQ(mp::MemorySize{"0"}.in_bytes(), 0LL);
 }
 
 TEST(MemorySize, convertsHigherUnitToK)
