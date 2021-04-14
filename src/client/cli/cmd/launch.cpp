@@ -427,6 +427,13 @@ mp::ReturnCode cmd::Launch::request_launch()
             {LaunchProgress_ProgressTypes_VERIFY, "Verifying image: "},
             {LaunchProgress_ProgressTypes_WAITING, "Preparing image: "}};
 
+        if (!reply.log_line().empty())
+        {
+            spinner.stop();
+            cerr << reply.log_line() << "\n";
+            spinner.start();
+        }
+
         if (reply.create_oneof_case() == mp::LaunchReply::CreateOneofCase::kLaunchProgress)
         {
             auto& progress_message = progress_messages[reply.launch_progress().type()];
