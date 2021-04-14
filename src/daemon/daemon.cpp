@@ -2044,10 +2044,13 @@ void mp::Daemon::create_vm(const CreateRequest* request, grpc::ServerWriter<Crea
     preparing_instances.insert(name);
 
     auto prepare_future_watcher = new QFutureWatcher<VirtualMachineDescription>();
+    auto log_level = mpl::level_from(request->verbosity_level());
 
     QObject::connect(
         prepare_future_watcher, &QFutureWatcher<VirtualMachineDescription>::finished,
-        [this, server, status_promise, name, start, prepare_future_watcher] {
+        [this, server, status_promise, name, start, prepare_future_watcher, log_level] {
+            mpl::ClientLogger<CreateReply> logger{log_level, *config->logger, server};
+
             try
             {
                 auto vm_desc = prepare_future_watcher->future().result();
@@ -2103,7 +2106,10 @@ void mp::Daemon::create_vm(const CreateRequest* request, grpc::ServerWriter<Crea
             delete prepare_future_watcher;
         });
 
-    auto make_vm_description = [this, server, request, name, checked_args]() mutable -> VirtualMachineDescription {
+    auto make_vm_description = [this, server, request, name, checked_args,
+                                log_level]() mutable -> VirtualMachineDescription {
+        mpl::ClientLogger<CreateReply> logger{log_level, *config->logger, server};
+
         try
         {
             auto query = query_from(request, name);
