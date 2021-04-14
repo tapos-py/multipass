@@ -268,7 +268,7 @@ struct CreateBridgeTest : public Test
 {
     void SetUp() override
     {
-        // TODO@ricab mock logger
+        // TODO mock logger
         // These will accept any number of calls (0..N) but they can still be shadowed
         EXPECT_CALL(*mock_dbus_provider, get_system_bus).WillRepeatedly(ReturnRef(mock_bus));
         EXPECT_CALL(*mock_nm_root, is_valid).WillRepeatedly(Return(true));
@@ -525,7 +525,7 @@ TEST_F(CreateBridgeTest, logs_on_failure_to_rollback)
                                         Eq("org.freedesktop.NetworkManager.Settings.Connection")))
         .WillOnce(Return(ByMove(std::move(mock_nm_connection1))));
 
-    // TODO@ricab verify error is logged
+    // TODO verify error is logged
     MP_ASSERT_THROW_THAT(mp::backend::create_bridge_with("gigi"), int, Eq(error));
 }
 
