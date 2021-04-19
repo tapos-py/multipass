@@ -22,6 +22,7 @@
 #include <multipass/cli/argparser.h>
 #include <multipass/cli/client_platform.h>
 #include <multipass/constants.h>
+#include <multipass/exceptions/cmd_exceptions.h>
 #include <multipass/exceptions/snap_environment_exception.h>
 #include <multipass/format.h>
 #include <multipass/settings.h>
@@ -50,11 +51,6 @@ const std::regex no{"n|no", std::regex::icase | std::regex::optimize};
 const std::regex later{"l|later", std::regex::icase | std::regex::optimize};
 const std::regex show{"s|show", std::regex::icase | std::regex::optimize};
 
-struct NetworkDefinitionException : public std::runtime_error
-{
-    using std::runtime_error::runtime_error;
-};
-
 auto checked_mode(const std::string& mode)
 {
     if (mode == "auto")
@@ -62,13 +58,13 @@ auto checked_mode(const std::string& mode)
     if (mode == "manual")
         return mp::LaunchRequest_NetworkOptions_Mode::LaunchRequest_NetworkOptions_Mode_MANUAL;
     else
-        throw NetworkDefinitionException{fmt::format("Bad network mode '{}', need 'auto' or 'manual'", mode)};
+        throw mp::ValidationException{fmt::format("Bad network mode '{}', need 'auto' or 'manual'", mode)};
 }
 
 const std::string& checked_mac(const std::string& mac)
 {
     if (!mpu::valid_mac_address(mac))
-        throw NetworkDefinitionException(fmt::format("Invalid MAC address: {}", mac));
+        throw mp::ValidationException(fmt::format("Invalid MAC address: {}", mac));
 
     return mac;
 }
@@ -92,7 +88,7 @@ auto net_digest(const QString& options)
             else if (key == "mac")
                 net.set_mac_address(checked_mac(val.toStdString()));
             else
-                throw NetworkDefinitionException{fmt::format("Bad network field: {}", key)};
+                throw mp::ValidationException{fmt::format("Bad network field: {}", key)};
         }
 
         // Interpret as "name" the argument when there are no ',' and no '='.
@@ -100,11 +96,11 @@ auto net_digest(const QString& options)
             net.set_id(key_value_split[0].toStdString());
 
         else
-            throw NetworkDefinitionException{fmt::format("Bad network field definition: {}", key_value_pair)};
+            throw mp::ValidationException{fmt::format("Bad network field definition: {}", key_value_pair)};
     }
 
     if (net.id().empty())
-        throw NetworkDefinitionException{fmt::format("Bad network definition, need at least a 'name' field")};
+        throw mp::ValidationException{fmt::format("Bad network definition, need at least a 'name' field")};
 
     return net;
 }
@@ -207,6 +203,8 @@ mp::ParseCode cmd::Launch::parse_args(mp::ArgParser* parser)
 
     parser->addOptions({cpusOption, diskOption, memOption, nameOption, cloudInitOption, networkOption});
 
+    mp::cmd::add_timeout(parser);
+
     auto status = parser->commandParse(this);
 
     if (status != ParseCode::Ok)
@@ -306,8 +304,10 @@ mp::ParseCode cmd::Launch::parse_args(mp::ArgParser* parser)
         if (parser->isSet(networkOption))
             for (const auto& net : parser->values(networkOption))
                 request.mutable_network_options()->Add(net_digest(net));
+
+        request.set_timeout(mp::cmd::parse_timeout(parser));
     }
-    catch (NetworkDefinitionException& e)
+    catch (mp::ValidationException& e)
     {
         cerr << "error: " << e.what() << "\n";
         return ParseCode::CommandLineError;

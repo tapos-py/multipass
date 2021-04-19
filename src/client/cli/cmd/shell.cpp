@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Canonical, Ltd.
+ * Copyright (C) 2017-2021 Canonical, Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,6 +21,7 @@
 #include "animated_spinner.h"
 #include <multipass/cli/argparser.h>
 #include <multipass/constants.h>
+#include <multipass/exceptions/cmd_exceptions.h>
 #include <multipass/settings.h>
 #include <multipass/ssh/ssh_client.h>
 
@@ -69,12 +70,19 @@ mp::ReturnCode cmd::Shell::run(mp::ArgParser* parser)
     };
 
     auto on_failure = [this, &instance_name, parser](grpc::Status& status) {
+        QStringList retry_args{};
+
         if (status.error_code() == grpc::StatusCode::NOT_FOUND && instance_name == petenv_name.toStdString())
-            return run_cmd_and_retry({"multipass", "launch", "--name", petenv_name}, parser, cout, cerr);
+            retry_args.append({"multipass", "launch", "--name", petenv_name});
         else if (status.error_code() == grpc::StatusCode::ABORTED)
-            return run_cmd_and_retry({"multipass", "start", QString::fromStdString(instance_name)}, parser, cout, cerr);
+            retry_args.append({"multipass", "start", QString::fromStdString(instance_name)});
         else
             return standard_failure_handler_for(name(), cerr, status);
+
+        if (parser->isSet("timeout"))
+            retry_args.append({"--timeout", parser->value("timeout")});
+
+        return run_cmd_and_retry(retry_args, parser, cout, cerr);
     };
 
     request.set_verbosity_level(parser->verbosityLevel());
@@ -112,11 +120,23 @@ mp::ParseCode cmd::Shell::parse_args(mp::ArgParser* parser)
             .arg(petenv_name),
         "[<name>]");
 
+    mp::cmd::add_timeout(parser);
+
     auto status = parser->commandParse(this);
 
     if (status != ParseCode::Ok)
     {
         return status;
+    }
+
+    try
+    {
+        mp::cmd::parse_timeout(parser);
+    }
+    catch (const mp::ValidationException& e)
+    {
+        cerr << "error: " << e.what() << std::endl;
+        return ParseCode::CommandLineError;
     }
 
     const auto pos_args = parser->positionalArguments();

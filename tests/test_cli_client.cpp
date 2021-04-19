@@ -214,6 +214,12 @@ struct Client : public Test
         return Property(&RequestType::verbosity_level, Eq(verbosity));
     }
 
+    template <typename RequestType>
+    auto make_request_timeout_matcher(decltype(std::declval<RequestType>().timeout()) timeout)
+    {
+        return Property(&RequestType::timeout, Eq(timeout));
+    }
+
     void aux_set_cmd_rejects_bad_val(const char* key, const char* val)
     {
         const auto default_val = get_setting(key);
@@ -435,6 +441,20 @@ TEST_F(Client, shell_cmd_forwards_verbosity_to_subcommands)
     EXPECT_CALL(mock_daemon, ssh_info(_, make_request_verbosity_matcher<mp::SSHInfoRequest>(verbosity), _))
         .WillOnce(Return(ok));
     EXPECT_THAT(send_command({"shell", "-vvv"}), Eq(mp::ReturnCode::Ok));
+}
+
+TEST_F(Client, shell_cmd_forwards_timeout_to_subcommands)
+{
+    const grpc::Status ok{}, notfound{grpc::StatusCode::NOT_FOUND, "msg"};
+    const auto timeout = 123;
+
+    InSequence seq;
+    EXPECT_CALL(mock_daemon, ssh_info).WillOnce(Return(notfound));
+    EXPECT_CALL(mock_daemon, launch(_, make_request_timeout_matcher<mp::LaunchRequest>(timeout), _))
+        .WillOnce(Return(ok));
+    EXPECT_CALL(mock_daemon, mount).WillOnce(Return(ok));
+    EXPECT_CALL(mock_daemon, ssh_info).WillOnce(Return(ok));
+    EXPECT_THAT(send_command({"shell", "--timeout", std::to_string(timeout)}), Eq(mp::ReturnCode::Ok));
 }
 
 TEST_F(Client, shell_cmd_fails_when_automounting_in_petenv_fails)
@@ -1108,6 +1128,21 @@ TEST_F(Client, start_cmd_forwards_verbosity_to_subcommands)
     EXPECT_CALL(mock_daemon, start(_, make_request_verbosity_matcher<mp::StartRequest>(verbosity), _))
         .WillOnce(Return(ok));
     EXPECT_THAT(send_command({"start", "-vv"}), Eq(mp::ReturnCode::Ok));
+}
+
+TEST_F(Client, start_cmd_forwards_timeout_to_subcommands)
+{
+    const grpc::Status ok{}, aborted = aborted_start_status({petenv_name()});
+    const auto timeout = 123;
+
+    InSequence seq;
+    EXPECT_CALL(mock_daemon, start(_, make_request_timeout_matcher<mp::StartRequest>(timeout), _))
+        .WillOnce(Return(aborted));
+    EXPECT_CALL(mock_daemon, launch(_, make_request_timeout_matcher<mp::LaunchRequest>(timeout), _))
+        .WillOnce(Return(ok));
+    EXPECT_CALL(mock_daemon, mount).WillOnce(Return(ok));
+    EXPECT_CALL(mock_daemon, start(_, make_request_timeout_matcher<mp::StartRequest>(timeout), _)).WillOnce(Return(ok));
+    EXPECT_THAT(send_command({"start", "--timeout", std::to_string(timeout)}), Eq(mp::ReturnCode::Ok));
 }
 
 TEST_F(Client, start_cmd_fails_when_automounting_in_petenv_fails)
@@ -1903,4 +1938,54 @@ TEST_F(Client, help_cmd_launch_same_launch_cmd_help)
     EXPECT_THAT(help_cmd_launch.str(), Ne(""));
     EXPECT_THAT(help_cmd_launch.str(), Eq(launch_cmd_help.str()));
 }
+
+const std::vector<std::string> timeout_commands{"launch", "start", "restart", "shell"};
+const std::vector<std::string> valid_timeouts{"120", "1234567"};
+const std::vector<std::string> invalid_timeouts{"-1", "0", "a", "3min", ""};
+
+struct TimeoutCorrectSuite : Client, WithParamInterface<std::tuple<std::string, std::string>>
+{
+};
+
+TEST_P(TimeoutCorrectSuite, cmds_with_timeout_ok)
+{
+    const auto& [command, timeout] = GetParam();
+
+    EXPECT_CALL(mock_daemon, launch).Times(AtMost(1));
+    EXPECT_CALL(mock_daemon, start).Times(AtMost(1));
+    EXPECT_CALL(mock_daemon, restart).Times(AtMost(1));
+    EXPECT_CALL(mock_daemon, ssh_info).Times(AtMost(1));
+    EXPECT_THAT(send_command({command, "--timeout", timeout}), Eq(mp::ReturnCode::Ok));
+}
+
+INSTANTIATE_TEST_SUITE_P(Client, TimeoutCorrectSuite, Combine(ValuesIn(timeout_commands), ValuesIn(valid_timeouts)));
+
+struct TimeoutNullSuite : Client, WithParamInterface<std::string>
+{
+};
+
+TEST_P(TimeoutNullSuite, cmds_with_timeout_null_bad)
+{
+    EXPECT_THAT(send_command({GetParam(), "--timeout"}), Eq(mp::ReturnCode::CommandLineError));
+}
+
+INSTANTIATE_TEST_SUITE_P(Client, TimeoutNullSuite, ValuesIn(timeout_commands));
+
+struct TimeoutInvalidSuite : Client, WithParamInterface<std::tuple<std::string, std::string>>
+{
+};
+
+TEST_P(TimeoutInvalidSuite, cmds_with_invalid_timeout_bad)
+{
+    std::stringstream cerr_stream;
+    const auto& [command, timeout] = GetParam();
+
+    EXPECT_THAT(send_command({command, "--timeout", timeout}, trash_stream, cerr_stream),
+                Eq(mp::ReturnCode::CommandLineError));
+
+    EXPECT_EQ(cerr_stream.str(), "error: --timeout value has to be a positive integer\n");
+}
+
+INSTANTIATE_TEST_SUITE_P(Client, TimeoutInvalidSuite, Combine(ValuesIn(timeout_commands), ValuesIn(invalid_timeouts)));
+
 } // namespace
